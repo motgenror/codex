@@ -345,6 +345,37 @@ mod detect_shell_type_tests {
 }
 
 #[cfg(test)]
+mod default_shell_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn posix_flag_disabled_matches_default() {
+        assert_eq!(
+            default_user_shell_with_posix_on_windows(false),
+            Some(default_user_shell())
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn posix_flag_enabled_uses_bash_lookup_on_windows() {
+        let expected = get_shell(ShellType::Bash, None);
+        let actual = default_user_shell_with_posix_on_windows(true);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn posix_flag_enabled_matches_default_on_non_windows() {
+        assert_eq!(
+            default_user_shell_with_posix_on_windows(true),
+            Some(default_user_shell())
+        );
+    }
+}
+
+#[cfg(test)]
 #[cfg(unix)]
 mod tests {
     use super::*;

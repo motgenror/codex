@@ -321,8 +321,13 @@ mod tests {
             return;
         }
 
+        let pwsh_path = r"C:\Program Files\PowerShell\7\pwsh.exe";
+        if !std::path::Path::new(pwsh_path).exists() {
+            return;
+        }
+
         assert!(is_known_safe_command(&vec_str(&[
-            r"C:\Program Files\PowerShell\7\pwsh.exe",
+            pwsh_path,
             "-Command",
             "Get-Location",
         ])));
