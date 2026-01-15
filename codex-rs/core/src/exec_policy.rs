@@ -127,6 +127,7 @@ impl ExecPolicyManager {
                 sandbox_policy,
                 cmd,
                 sandbox_permissions,
+                features,
             )
         };
         let evaluation = exec_policy.check_multiple(commands.iter(), &exec_policy_fallback);
@@ -266,8 +267,9 @@ pub fn render_decision_for_unmatched_command(
     sandbox_policy: &SandboxPolicy,
     command: &[String],
     sandbox_permissions: SandboxPermissions,
+    features: &Features,
 ) -> Decision {
-    if is_known_safe_command(command) {
+    if is_known_safe_command(command, features) {
         return Decision::Allow;
     }
 

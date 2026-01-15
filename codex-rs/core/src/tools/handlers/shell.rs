@@ -82,13 +82,16 @@ impl ToolHandler for ShellHandler {
     }
 
     async fn is_mutating(&self, invocation: &ToolInvocation) -> bool {
+        let features = invocation.session.features();
         match &invocation.payload {
             ToolPayload::Function { arguments } => {
                 serde_json::from_str::<ShellToolCallParams>(arguments)
-                    .map(|params| !is_known_safe_command(&params.command))
+                    .map(|params| !is_known_safe_command(&params.command, &features))
                     .unwrap_or(true)
             }
-            ToolPayload::LocalShell { params } => !is_known_safe_command(&params.command),
+            ToolPayload::LocalShell { params } => {
+                !is_known_safe_command(&params.command, &features)
+            }
             _ => true, // unknown payloads => assume mutating
         }
     }
@@ -153,11 +156,12 @@ impl ToolHandler for ShellCommandHandler {
             return true;
         };
 
+        let features = invocation.session.features();
         serde_json::from_str::<ShellCommandToolCallParams>(arguments)
             .map(|params| {
                 let shell = invocation.session.user_shell();
                 let command = Self::base_command(shell.as_ref(), &params.command, params.login);
-                !is_known_safe_command(&command)
+                !is_known_safe_command(&command, &features)
             })
             .unwrap_or(true)
     }
@@ -345,11 +349,14 @@ mod tests {
     }
 
     fn assert_safe(shell: &Shell, command: &str) {
+        let features = crate::features::Features::with_defaults();
         assert!(is_known_safe_command(
-            &shell.derive_exec_args(command, /* use_login_shell */ true)
+            &shell.derive_exec_args(command, /* use_login_shell */ true),
+            &features
         ));
         assert!(is_known_safe_command(
-            &shell.derive_exec_args(command, /* use_login_shell */ false)
+            &shell.derive_exec_args(command, /* use_login_shell */ false),
+            &features
         ));
     }
 

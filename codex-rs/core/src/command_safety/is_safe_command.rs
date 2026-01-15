@@ -1,7 +1,10 @@
 use crate::bash::parse_shell_lc_plain_commands;
 use crate::command_safety::windows_safe_commands::is_safe_command_windows;
+use crate::features::Feature;
+use crate::features::Features;
 
-pub fn is_known_safe_command(command: &[String]) -> bool {
+pub fn is_known_safe_command(command: &[String], features: &Features) -> bool {
+    let allow_linux_only_tools = allow_linux_only_tools(features);
     let command: Vec<String> = command
         .iter()
         .map(|s| {
@@ -17,7 +20,7 @@ pub fn is_known_safe_command(command: &[String]) -> bool {
         return true;
     }
 
-    if is_safe_to_call_with_exec(&command) {
+    if is_safe_to_call_with_exec(&command, allow_linux_only_tools) {
         return true;
     }
 
@@ -31,14 +34,19 @@ pub fn is_known_safe_command(command: &[String]) -> bool {
         && !all_commands.is_empty()
         && all_commands
             .iter()
-            .all(|cmd| is_safe_to_call_with_exec(cmd))
+            .all(|cmd| is_safe_to_call_with_exec(cmd, allow_linux_only_tools))
     {
         return true;
     }
     false
 }
 
-fn is_safe_to_call_with_exec(command: &[String]) -> bool {
+fn allow_linux_only_tools(features: &Features) -> bool {
+    cfg!(target_os = "linux")
+        || (cfg!(windows) && features.enabled(Feature::UsePosixShellOnWindows))
+}
+
+fn is_safe_to_call_with_exec(command: &[String], allow_linux_only_tools: bool) -> bool {
     let Some(cmd0) = command.first().map(String::as_str) else {
         return false;
     };
@@ -47,7 +55,7 @@ fn is_safe_to_call_with_exec(command: &[String]) -> bool {
         .file_name()
         .and_then(|osstr| osstr.to_str())
     {
-        Some(cmd) if cfg!(target_os = "linux") && matches!(cmd, "numfmt" | "tac") => true,
+        Some(cmd) if allow_linux_only_tools && matches!(cmd, "numfmt" | "tac") => true,
 
         #[rustfmt::skip]
         Some(
@@ -197,6 +205,8 @@ fn is_valid_sed_n_arg(arg: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::Feature;
+    use crate::features::Features;
     use std::string::ToString;
 
     fn vec_str(args: &[&str]) -> Vec<String> {
@@ -205,44 +215,83 @@ mod tests {
 
     #[test]
     fn known_safe_examples() {
-        assert!(is_safe_to_call_with_exec(&vec_str(&["ls"])));
-        assert!(is_safe_to_call_with_exec(&vec_str(&["git", "status"])));
-        assert!(is_safe_to_call_with_exec(&vec_str(&["base64"])));
-        assert!(is_safe_to_call_with_exec(&vec_str(&[
-            "sed", "-n", "1,5p", "file.txt"
-        ])));
-        assert!(is_safe_to_call_with_exec(&vec_str(&[
-            "nl",
-            "-nrz",
-            "Cargo.toml"
-        ])));
+        let features = Features::with_defaults();
+        let allow_linux_only_tools = allow_linux_only_tools(&features);
+
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["ls"]),
+            allow_linux_only_tools
+        ));
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["git", "status"]),
+            allow_linux_only_tools
+        ));
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["base64"]),
+            allow_linux_only_tools
+        ));
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["sed", "-n", "1,5p", "file.txt"]),
+            allow_linux_only_tools
+        ));
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["nl", "-nrz", "Cargo.toml"]),
+            allow_linux_only_tools
+        ));
 
         // Safe `find` command (no unsafe options).
-        assert!(is_safe_to_call_with_exec(&vec_str(&[
-            "find", ".", "-name", "file.txt"
-        ])));
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["find", ".", "-name", "file.txt"]),
+            allow_linux_only_tools
+        ));
 
-        if cfg!(target_os = "linux") {
-            assert!(is_safe_to_call_with_exec(&vec_str(&["numfmt", "1000"])));
-            assert!(is_safe_to_call_with_exec(&vec_str(&["tac", "Cargo.toml"])));
+        if allow_linux_only_tools {
+            assert!(is_safe_to_call_with_exec(
+                &vec_str(&["numfmt", "1000"]),
+                allow_linux_only_tools
+            ));
+            assert!(is_safe_to_call_with_exec(
+                &vec_str(&["tac", "Cargo.toml"]),
+                allow_linux_only_tools
+            ));
         } else {
-            assert!(!is_safe_to_call_with_exec(&vec_str(&["numfmt", "1000"])));
-            assert!(!is_safe_to_call_with_exec(&vec_str(&["tac", "Cargo.toml"])));
+            assert!(!is_safe_to_call_with_exec(
+                &vec_str(&["numfmt", "1000"]),
+                allow_linux_only_tools
+            ));
+            assert!(!is_safe_to_call_with_exec(
+                &vec_str(&["tac", "Cargo.toml"]),
+                allow_linux_only_tools
+            ));
         }
     }
 
     #[test]
     fn zsh_lc_safe_command_sequence() {
-        assert!(is_known_safe_command(&vec_str(&["zsh", "-lc", "ls"])));
+        let features = Features::with_defaults();
+        assert!(is_known_safe_command(
+            &vec_str(&["zsh", "-lc", "ls"]),
+            &features
+        ));
     }
 
     #[test]
     fn unknown_or_partial() {
-        assert!(!is_safe_to_call_with_exec(&vec_str(&["foo"])));
-        assert!(!is_safe_to_call_with_exec(&vec_str(&["git", "fetch"])));
-        assert!(!is_safe_to_call_with_exec(&vec_str(&[
-            "sed", "-n", "xp", "file.txt"
-        ])));
+        let features = Features::with_defaults();
+        let allow_linux_only_tools = allow_linux_only_tools(&features);
+
+        assert!(!is_safe_to_call_with_exec(
+            &vec_str(&["foo"]),
+            allow_linux_only_tools
+        ));
+        assert!(!is_safe_to_call_with_exec(
+            &vec_str(&["git", "fetch"]),
+            allow_linux_only_tools
+        ));
+        assert!(!is_safe_to_call_with_exec(
+            &vec_str(&["sed", "-n", "xp", "file.txt"]),
+            allow_linux_only_tools
+        ));
 
         // Unsafe `find` commands.
         for args in [
@@ -259,7 +308,7 @@ mod tests {
             vec_str(&["find", ".", "-fprintf", "/root/suid.txt", "%#m %u %p\n"]),
         ] {
             assert!(
-                !is_safe_to_call_with_exec(&args),
+                !is_safe_to_call_with_exec(&args, allow_linux_only_tools),
                 "expected {args:?} to be unsafe"
             );
         }
@@ -267,6 +316,9 @@ mod tests {
 
     #[test]
     fn base64_output_options_are_unsafe() {
+        let features = Features::with_defaults();
+        let allow_linux_only_tools = allow_linux_only_tools(&features);
+
         for args in [
             vec_str(&["base64", "-o", "out.bin"]),
             vec_str(&["base64", "--output", "out.bin"]),
@@ -274,7 +326,7 @@ mod tests {
             vec_str(&["base64", "-ob64.txt"]),
         ] {
             assert!(
-                !is_safe_to_call_with_exec(&args),
+                !is_safe_to_call_with_exec(&args, allow_linux_only_tools),
                 "expected {args:?} to be considered unsafe due to output option"
             );
         }
@@ -282,12 +334,14 @@ mod tests {
 
     #[test]
     fn ripgrep_rules() {
+        let features = Features::with_defaults();
+        let allow_linux_only_tools = allow_linux_only_tools(&features);
+
         // Safe ripgrep invocations – none of the unsafe flags are present.
-        assert!(is_safe_to_call_with_exec(&vec_str(&[
-            "rg",
-            "Cargo.toml",
-            "-n"
-        ])));
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["rg", "Cargo.toml", "-n"]),
+            allow_linux_only_tools
+        ));
 
         // Unsafe flags that do not take an argument (present verbatim).
         for args in [
@@ -295,7 +349,7 @@ mod tests {
             vec_str(&["rg", "-z", "files"]),
         ] {
             assert!(
-                !is_safe_to_call_with_exec(&args),
+                !is_safe_to_call_with_exec(&args, allow_linux_only_tools),
                 "expected {args:?} to be considered unsafe due to zip-search flag",
             );
         }
@@ -308,7 +362,7 @@ mod tests {
             vec_str(&["rg", "--hostname-bin=pwned", "files"]),
         ] {
             assert!(
-                !is_safe_to_call_with_exec(&args),
+                !is_safe_to_call_with_exec(&args, allow_linux_only_tools),
                 "expected {args:?} to be considered unsafe due to external-command flag",
             );
         }
@@ -326,105 +380,142 @@ mod tests {
             return;
         }
 
-        assert!(is_known_safe_command(&vec_str(&[
-            pwsh_path,
-            "-Command",
-            "Get-Location",
-        ])));
+        let features = Features::with_defaults();
+        assert!(is_known_safe_command(
+            &vec_str(&[pwsh_path, "-Command", "Get-Location",]),
+            &features
+        ));
     }
 
     #[test]
     fn bash_lc_safe_examples() {
-        assert!(is_known_safe_command(&vec_str(&["bash", "-lc", "ls"])));
-        assert!(is_known_safe_command(&vec_str(&["bash", "-lc", "ls -1"])));
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "git status"
-        ])));
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "grep -R \"Cargo.toml\" -n"
-        ])));
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "sed -n 1,5p file.txt"
-        ])));
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "sed -n '1,5p' file.txt"
-        ])));
+        let features = Features::with_defaults();
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "ls"]),
+            &features
+        ));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "ls -1"]),
+            &features
+        ));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "git status"]),
+            &features
+        ));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "grep -R \"Cargo.toml\" -n"]),
+            &features
+        ));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "sed -n 1,5p file.txt"]),
+            &features
+        ));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "sed -n '1,5p' file.txt"]),
+            &features
+        ));
 
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "find . -name file.txt"
-        ])));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "find . -name file.txt"]),
+            &features
+        ));
     }
 
     #[test]
     fn bash_lc_safe_examples_with_operators() {
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "grep -R \"Cargo.toml\" -n || true"
-        ])));
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "ls && pwd"
-        ])));
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "echo 'hi' ; ls"
-        ])));
-        assert!(is_known_safe_command(&vec_str(&[
-            "bash",
-            "-lc",
-            "ls | wc -l"
-        ])));
+        let features = Features::with_defaults();
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "grep -R \"Cargo.toml\" -n || true"]),
+            &features
+        ));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "ls && pwd"]),
+            &features
+        ));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "echo 'hi' ; ls"]),
+            &features
+        ));
+        assert!(is_known_safe_command(
+            &vec_str(&["bash", "-lc", "ls | wc -l"]),
+            &features
+        ));
     }
 
     #[test]
     fn bash_lc_unsafe_examples() {
+        let features = Features::with_defaults();
         assert!(
-            !is_known_safe_command(&vec_str(&["bash", "-lc", "git", "status"])),
+            !is_known_safe_command(&vec_str(&["bash", "-lc", "git", "status"]), &features),
             "Four arg version is not known to be safe."
         );
         assert!(
-            !is_known_safe_command(&vec_str(&["bash", "-lc", "'git status'"])),
+            !is_known_safe_command(&vec_str(&["bash", "-lc", "'git status'"]), &features),
             "The extra quoting around 'git status' makes it a program named 'git status' and is therefore unsafe."
         );
 
         assert!(
-            !is_known_safe_command(&vec_str(&["bash", "-lc", "find . -name file.txt -delete"])),
+            !is_known_safe_command(
+                &vec_str(&["bash", "-lc", "find . -name file.txt -delete"]),
+                &features
+            ),
             "Unsafe find option should not be auto-approved."
         );
 
         // Disallowed because of unsafe command in sequence.
         assert!(
-            !is_known_safe_command(&vec_str(&["bash", "-lc", "ls && rm -rf /"])),
+            !is_known_safe_command(&vec_str(&["bash", "-lc", "ls && rm -rf /"]), &features),
             "Sequence containing unsafe command must be rejected"
         );
 
         // Disallowed because of parentheses / subshell.
         assert!(
-            !is_known_safe_command(&vec_str(&["bash", "-lc", "(ls)"])),
+            !is_known_safe_command(&vec_str(&["bash", "-lc", "(ls)"]), &features),
             "Parentheses (subshell) are not provably safe with the current parser"
         );
         assert!(
-            !is_known_safe_command(&vec_str(&["bash", "-lc", "ls || (pwd && echo hi)"])),
+            !is_known_safe_command(
+                &vec_str(&["bash", "-lc", "ls || (pwd && echo hi)"]),
+                &features
+            ),
             "Nested parentheses are not provably safe with the current parser"
         );
 
         // Disallowed redirection.
         assert!(
-            !is_known_safe_command(&vec_str(&["bash", "-lc", "ls > out.txt"])),
+            !is_known_safe_command(&vec_str(&["bash", "-lc", "ls > out.txt"]), &features),
             "> redirection should be rejected"
         );
+    }
+
+    #[test]
+    fn numfmt_and_tac_are_allowed_when_posix_enabled_on_windows() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let mut features = Features::with_defaults();
+        let linux_only_tools_allowed = allow_linux_only_tools(&features);
+        assert!(!linux_only_tools_allowed);
+        assert!(!is_safe_to_call_with_exec(
+            &vec_str(&["numfmt", "1000"]),
+            linux_only_tools_allowed
+        ));
+        assert!(!is_safe_to_call_with_exec(
+            &vec_str(&["tac", "Cargo.toml"]),
+            linux_only_tools_allowed
+        ));
+
+        features.enable(Feature::UsePosixShellOnWindows);
+        let linux_only_tools_allowed = allow_linux_only_tools(&features);
+        assert!(linux_only_tools_allowed);
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["numfmt", "1000"]),
+            linux_only_tools_allowed
+        ));
+        assert!(is_safe_to_call_with_exec(
+            &vec_str(&["tac", "Cargo.toml"]),
+            linux_only_tools_allowed
+        ));
     }
 }

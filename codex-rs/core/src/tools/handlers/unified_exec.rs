@@ -86,11 +86,12 @@ impl ToolHandler for UnifiedExecHandler {
             return true;
         };
 
+        let features = invocation.session.features();
         let Ok(params) = serde_json::from_str::<ExecCommandArgs>(arguments) else {
             return true;
         };
         let command = get_command(&params, invocation.session.user_shell());
-        !is_known_safe_command(&command)
+        !is_known_safe_command(&command, &features)
     }
 
     async fn handle(&self, invocation: ToolInvocation) -> Result<ToolOutput, FunctionCallError> {
