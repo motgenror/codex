@@ -246,6 +246,14 @@ pub fn default_user_shell() -> Shell {
     default_user_shell_from_path(get_user_shell_path())
 }
 
+pub fn default_user_shell_with_posix_on_windows(use_posix_shell_on_windows: bool) -> Option<Shell> {
+    if cfg!(windows) && use_posix_shell_on_windows {
+        get_shell(ShellType::Bash, None)
+    } else {
+        Some(default_user_shell())
+    }
+}
+
 fn default_user_shell_from_path(user_shell_path: Option<PathBuf>) -> Shell {
     if cfg!(windows) {
         get_shell(ShellType::PowerShell, None).unwrap_or(ultimate_fallback_shell())

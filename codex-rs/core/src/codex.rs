@@ -683,7 +683,14 @@ impl Session {
             config.active_profile.clone(),
         );
 
-        let mut default_shell = shell::default_user_shell();
+        let mut default_shell = shell::default_user_shell_with_posix_on_windows(
+            config.features.enabled(Feature::UsePosixShellOnWindows),
+        )
+        .ok_or_else(|| {
+            CodexErr::Fatal(
+                "use_posix_shell_on_windows is enabled, but `bash` was not found on PATH. Install bash (for example via MSYS2) or disable [features].use_posix_shell_on_windows.".to_string(),
+            )
+        })?;
         // Create the mutable state for the Session.
         if config.features.enabled(Feature::ShellSnapshot) {
             default_shell.shell_snapshot =

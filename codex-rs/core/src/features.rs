@@ -67,6 +67,8 @@ pub enum Feature {
     ShellTool,
 
     // Experimental
+    /// Use a POSIX shell (bash) on Windows when available.
+    UsePosixShellOnWindows,
     /// Use the single unified PTY-backed exec tool.
     UnifiedExec,
     /// Include the freeform apply_patch tool.
@@ -334,6 +336,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::WebSearchCached,
         key: "web_search_cached",
+        stage: Stage::Experimental,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::UsePosixShellOnWindows,
+        key: "use_posix_shell_on_windows",
         stage: Stage::Experimental,
         default_enabled: false,
     },

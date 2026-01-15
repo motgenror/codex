@@ -6,6 +6,12 @@ For advanced configuration instructions, see [this documentation](https://develo
 
 For a full configuration reference, see [this documentation](https://developers.openai.com/codex/config-reference).
 
+## Feature flags
+
+Feature flags are configured under the `[features]` table in `config.toml`.
+
+- `use_posix_shell_on_windows = true` opts into using `bash` on Windows (requires `bash` on `PATH`).
+
 ## Connecting to MCP servers
 
 Codex can connect to MCP servers configured in `~/.codex/config.toml`. See the configuration reference for the latest MCP server options:

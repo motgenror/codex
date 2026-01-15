@@ -132,6 +132,9 @@
         "unified_exec": {
           "type": "boolean"
         },
+        "use_posix_shell_on_windows": {
+          "type": "boolean"
+        },
         "web_search": {
           "type": "boolean"
         },
@@ -590,6 +593,9 @@
               "type": "boolean"
             },
             "unified_exec": {
+              "type": "boolean"
+            },
+            "use_posix_shell_on_windows": {
               "type": "boolean"
             },
             "web_search": {
