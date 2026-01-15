@@ -22,6 +22,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub(crate) struct ToolsConfig {
     pub shell_type: ConfigShellToolType,
+    pub use_posix_shell_on_windows: bool,
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     pub web_search_request: bool,
     pub web_search_cached: bool,
@@ -44,6 +45,7 @@ impl ToolsConfig {
         let include_web_search_request = features.enabled(Feature::WebSearchRequest);
         let include_web_search_cached = features.enabled(Feature::WebSearchCached);
         let include_collab_tools = features.enabled(Feature::Collab);
+        let use_posix_shell_on_windows = features.enabled(Feature::UsePosixShellOnWindows);
 
         let shell_type = if !features.enabled(Feature::ShellTool) {
             ConfigShellToolType::Disabled
@@ -72,6 +74,7 @@ impl ToolsConfig {
 
         Self {
             shell_type,
+            use_posix_shell_on_windows,
             apply_patch_tool_type,
             web_search_request: include_web_search_request,
             web_search_cached: include_web_search_cached,
@@ -266,7 +269,7 @@ fn create_write_stdin_tool() -> ToolSpec {
     })
 }
 
-fn create_shell_tool() -> ToolSpec {
+fn create_shell_tool(use_posix_shell_on_windows: bool) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "command".to_string(),
@@ -301,7 +304,7 @@ fn create_shell_tool() -> ToolSpec {
         ),
     ]);
 
-    let description  = if cfg!(windows) {
+    let description = if cfg!(windows) && !use_posix_shell_on_windows {
         r#"Runs a Powershell command (Windows) and returns its output. Arguments to `shell` will be passed to CreateProcessW(). Most commands should be prefixed with ["powershell.exe", "-Command"].
         
 Examples of valid command strings:
@@ -330,7 +333,7 @@ Examples of valid command strings:
     })
 }
 
-fn create_shell_command_tool() -> ToolSpec {
+fn create_shell_command_tool(use_posix_shell_on_windows: bool) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "command".to_string(),
@@ -375,7 +378,7 @@ fn create_shell_command_tool() -> ToolSpec {
         ),
     ]);
 
-    let description = if cfg!(windows) {
+    let description = if cfg!(windows) && !use_posix_shell_on_windows {
         r#"Runs a Powershell command (Windows) and returns its output.
         
 Examples of valid command strings:
@@ -1130,7 +1133,7 @@ pub(crate) fn build_specs(
 
     match &config.shell_type {
         ConfigShellToolType::Default => {
-            builder.push_spec(create_shell_tool());
+            builder.push_spec(create_shell_tool(config.use_posix_shell_on_windows));
         }
         ConfigShellToolType::Local => {
             builder.push_spec(ToolSpec::LocalShell {});
@@ -1145,7 +1148,7 @@ pub(crate) fn build_specs(
             // Do nothing.
         }
         ConfigShellToolType::ShellCommand => {
-            builder.push_spec(create_shell_command_tool());
+            builder.push_spec(create_shell_command_tool(config.use_posix_shell_on_windows));
         }
     }
 
@@ -2138,17 +2141,27 @@ mod tests {
 
     #[test]
     fn test_shell_tool() {
-        let tool = super::create_shell_tool();
+        let tool_default = super::create_shell_tool(false);
+        let tool_posix = super::create_shell_tool(true);
         let ToolSpec::Function(ResponsesApiTool {
-            description, name, ..
-        }) = &tool
+            description: default_description,
+            name,
+            ..
+        }) = &tool_default
         else {
             panic!("expected function tool");
         };
         assert_eq!(name, "shell");
 
-        let expected = if cfg!(windows) {
-            r#"Runs a Powershell command (Windows) and returns its output. Arguments to `shell` will be passed to CreateProcessW(). Most commands should be prefixed with ["powershell.exe", "-Command"].
+        let ToolSpec::Function(ResponsesApiTool {
+            description: posix_description,
+            ..
+        }) = &tool_posix
+        else {
+            panic!("expected function tool");
+        };
+
+        let powershell_expected = r#"Runs a Powershell command (Windows) and returns its output. Arguments to `shell` will be passed to CreateProcessW(). Most commands should be prefixed with ["powershell.exe", "-Command"].
         
 Examples of valid command strings:
 
@@ -2158,27 +2171,44 @@ Examples of valid command strings:
 - ps aux | grep python: ["powershell.exe", "-Command", "Get-Process | Where-Object { $_.ProcessName -like '*python*' }"]
 - setting an env var: ["powershell.exe", "-Command", "$env:FOO='bar'; echo $env:FOO"]
 - running an inline Python script: ["powershell.exe", "-Command", "@'\\nprint('Hello, world!')\\n'@ | python -"]"#
-        } else {
-            r#"Runs a shell command and returns its output.
+            .to_string();
+        let posix_expected = r#"Runs a shell command and returns its output.
 - The arguments to `shell` will be passed to execvp(). Most terminal commands should be prefixed with ["bash", "-lc"].
 - Always set the `workdir` param when using the shell function. Do not use `cd` unless absolutely necessary."#
-        }.to_string();
-        assert_eq!(description, &expected);
+            .to_string();
+
+        if cfg!(windows) {
+            assert_eq!(default_description, &powershell_expected);
+            assert_eq!(posix_description, &posix_expected);
+        } else {
+            assert_eq!(default_description, &posix_expected);
+            assert_eq!(posix_description, &posix_expected);
+        }
     }
 
     #[test]
     fn test_shell_command_tool() {
-        let tool = super::create_shell_command_tool();
+        let tool_default = super::create_shell_command_tool(false);
+        let tool_posix = super::create_shell_command_tool(true);
         let ToolSpec::Function(ResponsesApiTool {
-            description, name, ..
-        }) = &tool
+            description: default_description,
+            name,
+            ..
+        }) = &tool_default
         else {
             panic!("expected function tool");
         };
         assert_eq!(name, "shell_command");
 
-        let expected = if cfg!(windows) {
-            r#"Runs a Powershell command (Windows) and returns its output.
+        let ToolSpec::Function(ResponsesApiTool {
+            description: posix_description,
+            ..
+        }) = &tool_posix
+        else {
+            panic!("expected function tool");
+        };
+
+        let powershell_expected = r#"Runs a Powershell command (Windows) and returns its output.
         
 Examples of valid command strings:
 
@@ -2187,12 +2217,19 @@ Examples of valid command strings:
 - recursive grep: "Get-ChildItem -Path C:\\myrepo -Recurse | Select-String -Pattern 'TODO' -CaseSensitive"
 - ps aux | grep python: "Get-Process | Where-Object { $_.ProcessName -like '*python*' }"
 - setting an env var: "$env:FOO='bar'; echo $env:FOO"
-- running an inline Python script: "@'\\nprint('Hello, world!')\\n'@ | python -"#.to_string()
+- running an inline Python script: "@'\\nprint('Hello, world!')\\n'@ | python -"#
+            .to_string();
+        let posix_expected = r#"Runs a shell command and returns its output.
+- Always set the `workdir` param when using the shell_command function. Do not use `cd` unless absolutely necessary."#
+            .to_string();
+
+        if cfg!(windows) {
+            assert_eq!(default_description, &powershell_expected);
+            assert_eq!(posix_description, &posix_expected);
         } else {
-            r#"Runs a shell command and returns its output.
-- Always set the `workdir` param when using the shell_command function. Do not use `cd` unless absolutely necessary."#.to_string()
-        };
-        assert_eq!(description, &expected);
+            assert_eq!(default_description, &posix_expected);
+            assert_eq!(posix_description, &posix_expected);
+        }
     }
 
     #[test]
